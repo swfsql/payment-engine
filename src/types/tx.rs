@@ -4,6 +4,7 @@ use crate::{
 };
 use derive_more as dm;
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 pub type Txs = OrderedTxs;
 
@@ -58,6 +59,11 @@ pub struct TxId(u32);
 )]
 #[serde(transparent)]
 pub struct InternalTxId(u32);
+impl InternalTxId {
+    pub fn step(&mut self) {
+        self.0 += 1;
+    }
+}
 
 #[derive(Clone, Debug, Hash, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -65,18 +71,27 @@ pub struct ExternalTx {
     #[serde(rename = "type")]
     pub ty: TxType,
     pub client: ClientId,
+    #[serde(rename = "tx")]
     pub txid: TxId,
     pub amount: Option<Amount>,
 }
 
-#[derive(Clone, Debug, Hash, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+impl ExternalTx {
+    pub fn client_error(&self, error: ClTxError, internal_txid: InternalTxId) -> TxError {
+        TxError {
+            txid: self.txid.clone(),
+            internal_txid,
+            error,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Tx {
-    #[serde(rename = "type")]
     pub ty: TxType,
     pub client: ClientId,
-    #[serde(rename = "tx")]
     pub txid: TxId,
+    pub internal_txid: InternalTxId,
     pub amount: Option<Amount>,
     disputed: bool,
 }
@@ -95,18 +110,32 @@ impl Tx {
             Ok(())
         }
     }
-}
-
-impl From<&ExternalTx> for Tx {
-    fn from(extx: &ExternalTx) -> Self {
-        Tx {
-            ty: extx.ty.clone(),
-            client: extx.client.clone(),
-            txid: extx.txid.clone(),
-            amount: extx.amount.clone(),
+    pub fn unset_disputed(&mut self) -> Result<(), ClTxError> {
+        if !self.disputed {
+            Err(ClTxError::ResolvingOnNonDisputedTxError(self.txid.clone()))
+        } else {
+            self.disputed = false;
+            Ok(())
+        }
+    }
+    pub fn from_external(external: &ExternalTx, internal_txid: InternalTxId) -> Self {
+        Self {
+            ty: external.ty.clone(),
+            client: external.client.clone(),
+            txid: external.txid.clone(),
+            internal_txid,
+            amount: external.amount.clone(),
             disputed: false,
         }
     }
+}
+
+#[derive(Debug, Error)]
+#[error("Incoming tx {txid:?}, internal id {internal_txid:?}. error: {error}")]
+pub struct TxError {
+    txid: TxId,
+    internal_txid: InternalTxId,
+    error: ClTxError,
 }
 
 // TODO: check precision of amounts before printing

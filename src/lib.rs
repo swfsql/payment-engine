@@ -5,3 +5,7 @@ pub mod apply;
 pub mod types;
 
 pub use apply::{Apply, Prepare};
+pub use types::{
+    client::{self, Client, Clients},
+    tx::{self, ExternalTx, OrderedTxs},
+};
