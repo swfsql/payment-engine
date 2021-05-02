@@ -39,6 +39,12 @@ pub enum TxType {
 #[serde(transparent)]
 pub struct TxId(u32);
 
+/// `InternalTxId` is used because some transactions, such as the dispute type,
+/// does refer to other transactions but they don't have an id themselves,
+/// which could prevent a more complete logging of those type of transactions.
+///
+/// So the `InternalTxId` is incremented by a step for each incoming transaction,
+/// even if it was ignored.
 #[derive(
     Clone,
     Debug,
@@ -65,6 +71,10 @@ impl InternalTxId {
     }
 }
 
+/// The `ExternalTx` are consumed by the clients, but they are not stored
+/// in the programs internal state (HashMaps).  
+/// Instead, the `Tx` are, because they have extra field that can be change,
+/// such as the `disputed` status.
 #[derive(Clone, Debug, Hash, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct ExternalTx {
@@ -137,9 +147,6 @@ pub struct TxError {
     internal_txid: InternalTxId,
     error: ClTxError,
 }
-
-// TODO: check precision of amounts before printing
-// (they should have at most 4 decimal places)
 
 #[derive(Clone, Debug, Default, Hash, Eq, PartialEq, Ord, PartialOrd, dm::From, dm::Into)]
 pub struct OrderedTxs(Vec<Tx>);

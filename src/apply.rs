@@ -6,6 +6,7 @@ pub trait Prepare
 where
     Self: Sized,
 {
+    /// Creates a lazy-executable for state change.
     fn prepare<E, F>(&mut self, f: F) -> Prepared<'_, Self, E, F>
     where
         F: FnOnce(&mut Self) -> Result<(), E>,
@@ -16,12 +17,17 @@ where
 impl<T> Prepare for T {}
 
 pub trait PartialApply<'s, S, E, F>: Sized {
+    /// Split information, such as the current state and the
+    /// state-changing procedure.
     fn split(self) -> (&'s mut S, F);
+    /// Calculates the next state.
     fn partial_apply(s: &S, f: F) -> Result<S, E>;
+    /// Replaces the next state into `_self`.
     fn replace(_self: &mut S, next: S);
 }
 
 pub trait Apply<'s, S, E, F>: Sized {
+    /// First executes all the preparations, and then applies the changes.
     fn apply(self, token: Token<S>) -> Result<(), E>;
 }
 
@@ -44,6 +50,7 @@ mod prepared {
     use super::{Apply, Chain, PartialApply, Token};
     use std::marker::PhantomData;
 
+    /// Lazy execution of state changes.
     pub struct Prepared<'s, S, E, F> {
         pub _self: &'s mut S,
         pub f: F,
@@ -103,6 +110,9 @@ mod prepared {
 mod chain {
     use super::{Apply, PartialApply, Prepared, Token};
 
+    /// Lazy execution of a chain of state changes.
+    /// First all preparations are done, and then
+    /// all state modifications are executed.
     pub struct Chain<A1, A2> {
         a1: A1,
         a2: A2,
@@ -134,6 +144,8 @@ mod chain {
             let (s2, f2) = self.a2.split();
             let s2_next = A2::partial_apply(s2, f2)?;
 
+            // replacements are done at the end,
+            // after all preparations
             A1::replace(s1, s1_next);
             A2::replace(s2, s2_next);
 

@@ -17,7 +17,7 @@ fn run(path: &str, expected: &str) {
 
 #[test]
 fn basic_empty() {
-    run("tests/empty.csv", "");
+    run("tests/basic_empty.csv", "");
 }
 
 #[test]
