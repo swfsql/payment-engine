@@ -1,4 +1,7 @@
-use crate::types::{client::ClTxError, Amount, ClientId};
+use crate::{
+    apply::Token,
+    types::{client::ClTxError, Amount, ClientId},
+};
 use derive_more as dm;
 use serde::{Deserialize, Serialize};
 
@@ -121,7 +124,7 @@ impl OrderedTxs {
         self.0.push(client_tx);
     }
 
-    pub fn get_by_id(&self, tx: &TxId) -> Option<&Tx> {
+    pub fn get(&self, tx: &TxId) -> Option<&Tx> {
         self.0
             // assumes the vec is ordered
             .binary_search_by_key(tx, |cltx| cltx.txid.clone())
@@ -129,11 +132,16 @@ impl OrderedTxs {
             .and_then(|index| self.0.get(index))
     }
 
-    pub fn get_mut_by_id(&mut self, tx: &TxId) -> Option<&mut Tx> {
+    pub fn get_mut<'t>(
+        &'t mut self,
+        tx: &TxId,
+        _token: Token<'_, Self>,
+    ) -> Option<(Token<'t, Tx>, &mut Tx)> {
         self.0
             // assumes the vec is ordered
             .binary_search_by_key(tx, |cltx| cltx.txid.clone())
             .ok()
             .and_then(move |index| self.0.get_mut(index))
+            .map(Token::new)
     }
 }

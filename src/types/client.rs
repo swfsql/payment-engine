@@ -1,6 +1,9 @@
-use crate::types::{
-    tx::{TxType, Txs},
-    Amount, ClientId, ExternalTx, RhsSubTooBigError, TxId,
+use crate::{
+    apply::Token,
+    types::{
+        tx::{TxType, Txs},
+        Amount, ClientId, ExternalTx, RhsSubTooBigError, TxId,
+    },
 };
 use crate::{Apply, Prepare};
 use serde::{Deserialize, Serialize};
@@ -44,10 +47,12 @@ impl From<RhsSubTooBigError> for ClTxError {
 }
 
 impl Client {
-    pub fn try_process_transaction(
-        &mut self,
+    pub fn try_process_transaction<'c, 't>(
+        &'c mut self,
+        token_client: Token<'c, Client>,
         extx: &ExternalTx,
         previous_txs: &mut Txs,
+        token_txs: Token<'t, Txs>,
     ) -> Result<(), ClTxError> {
         use ClTxError::*;
         match &extx.ty {
@@ -58,7 +63,7 @@ impl Client {
                     next.total += amount.clone();
                     Ok(())
                 })
-                .apply()
+                .apply(token_client)
             }
             TxType::Withdrawal => {
                 let amount = extx.amount.as_ref().ok_or(MissingAmountError)?;
@@ -67,7 +72,7 @@ impl Client {
                     next.total.sufficient_sub(amount)?;
                     Ok(())
                 })
-                .apply()
+                .apply(token_client)
             }
             TxType::Dispute => {
                 if let Some(ref amount) = extx.amount {
@@ -77,8 +82,8 @@ impl Client {
                 // extx and disputed_tx would have the same txid information
                 let txid = &extx.txid;
 
-                let disputed_tx = previous_txs
-                    .get_mut_by_id(&extx.txid)
+                let (token_tx, disputed_tx) = previous_txs
+                    .get_mut(&extx.txid, token_txs)
                     .ok_or_else(|| DisputationOnANotFoundTxIdError(txid.clone()))?;
                 if TxType::Deposit != disputed_tx.ty {
                     return Err(DisputationOnNonDepositError(txid.clone()));
@@ -101,7 +106,7 @@ impl Client {
                     Ok(())
                 });
 
-                p1.chain(p2).apply()
+                p1.chain(p2).apply(token_client.then(token_tx))
             }
             TxType::Resolve => todo!(),
             TxType::Chargeback => todo!(),

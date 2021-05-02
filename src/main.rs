@@ -1,4 +1,7 @@
-use payment_engine::types::{Client, Clients, ExternalTx, OrderedTxs};
+use payment_engine::{
+    apply::Token,
+    types::{Client, Clients, ExternalTx, OrderedTxs},
+};
 use std::collections::HashMap;
 
 fn main() {
@@ -13,8 +16,12 @@ fn main() {
             id: id.clone(),
             ..Client::default()
         });
+
+        let (token_client, client) = Token::new(client);
+        let (token_txs, client_txs) = Token::new(&mut client_txs);
+
         client
-            .try_process_transaction(cltx, &mut client_txs)
+            .try_process_transaction(token_client, cltx, client_txs, token_txs)
             .unwrap();
 
         // todo: check if tx was ok, then..

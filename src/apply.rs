@@ -1,5 +1,6 @@
 use chain::Chain;
 use prepared::Prepared;
+use std::marker::PhantomData;
 
 pub trait Prepare
 where
@@ -21,11 +22,26 @@ pub trait PartialApply<'s, S, E, F>: Sized {
 }
 
 pub trait Apply<'s, S, E, F>: Sized {
-    fn apply(self) -> Result<(), E>;
+    fn apply(self, token: Token<S>) -> Result<(), E>;
+}
+
+#[derive(Debug)]
+pub struct Token<'t, T>(PhantomData<&'t T>);
+
+impl<'t, T> Token<'t, T> {
+    pub fn new(t: &'t mut T) -> (Self, &'t mut T) {
+        (Self(PhantomData), t)
+    }
+    pub fn then<'t2, 'tboth, T2>(self, _token2: Token<'t2, T2>) -> Token<'tboth, (T, T2)>
+    where
+        'tboth: 't + 't2,
+    {
+        Token(PhantomData)
+    }
 }
 
 mod prepared {
-    use super::{Apply, Chain, PartialApply};
+    use super::{Apply, Chain, PartialApply, Token};
     use std::marker::PhantomData;
 
     pub struct Prepared<'s, S, E, F> {
@@ -75,7 +91,7 @@ mod prepared {
         Self: PartialApply<'s, S, E, F>,
         S: 's,
     {
-        fn apply(self) -> Result<(), E> {
+        fn apply(self, _token: Token<'_, S>) -> Result<(), E> {
             let (_self, f) = self.split();
             let next = Self::partial_apply(_self, f)?;
             Self::replace(_self, next);
@@ -85,7 +101,7 @@ mod prepared {
 }
 
 mod chain {
-    use super::{Apply, PartialApply, Prepared};
+    use super::{Apply, PartialApply, Prepared, Token};
 
     pub struct Chain<A1, A2> {
         a1: A1,
@@ -111,7 +127,7 @@ mod chain {
         S1: 's1,
         S2: 's2,
     {
-        fn apply(self) -> Result<(), E> {
+        fn apply(self, _token: Token<'_, (S1, S2)>) -> Result<(), E> {
             let (s1, f1) = self.a1.split();
             let s1_next = A1::partial_apply(s1, f1)?;
 
