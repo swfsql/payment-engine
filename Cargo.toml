@@ -1,0 +1,22 @@
+[package]
+name = "payment-engine"
+version = "0.1.0"
+authors = ["Thiago Machado <swfsql@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+csv = "=1.1.6"
+derive_more = "=0.99.13"
+thiserror = "1.0.24"
+
+[dependencies.serde]
+version = "=1.0.125"
+default-features = false
+features = ["derive"]
+
+[dependencies.rust_decimal]
+version = "=1.12.4"
+default-features = false
+features = ["std", "serde"]
