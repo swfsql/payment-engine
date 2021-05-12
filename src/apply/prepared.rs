@@ -1,7 +1,10 @@
-
-use super::{target, Apply, Chain, ConsumedToken, PartialApply, Take, TakeOwned, Token, Upgrade};
+use super::{target, Apply, Chain, ConsumedToken, PartialApply, Take, TakeOwned, Token};
 use std::marker::PhantomData;
 
+/// Holds a single scoped modification into a copy of `T`.
+/// The copy receives the modification lazily, and at the late stage
+/// of `Prepared::apply`, the original value `T` is replaced by the
+/// modified copy.
 pub struct Prepared<OuterT, T, F, E> {
     inner: OuterT,
     f: F,
@@ -19,57 +22,12 @@ impl<'t, OuterT, T, FInner, E> Take<FInner, target::Function> for Prepared<Outer
     }
 }
 
-impl<'t, OuterT, T, FInner, E> TakeOwned<FInner, target::Function>
-    for Prepared<OuterT, T, FInner, E>
-{
-    fn take_owned(self) -> FInner {
-        self.f
-    }
-}
-
-impl<'t, OuterT, T, FInner, E> Take<Token<'t, T>, target::Token> for Prepared<OuterT, T, FInner, E>
-where
-    OuterT: Take<Token<'t, T>, target::Token>,
-{
-    fn take_ref(&self) -> &Token<'t, T> {
-        self.inner.take_ref()
-    }
-
-    fn take_mut(&mut self) -> &mut Token<'t, T> {
-        self.inner.take_mut()
-    }
-}
-
 impl<'t, OuterT, T, FInner, E> TakeOwned<Token<'t, T>, target::Token>
     for Prepared<OuterT, T, FInner, E>
 where
     OuterT: TakeOwned<Token<'t, T>, target::Token>,
 {
     fn take_owned(self) -> Token<'t, T> {
-        self.inner.take_owned()
-    }
-}
-
-impl<'u, 'l, OuterT, U, L, FInner, E> Take<&'u Token<'u, U>, target::UpperToken>
-    for Prepared<OuterT, L, FInner, E>
-where
-    OuterT: Take<&'u Token<'u, U>, target::UpperToken>,
-{
-    fn take_ref(&self) -> &&'u Token<'u, U> {
-        self.inner.take_ref()
-    }
-
-    fn take_mut(&mut self) -> &mut &'u Token<'u, U> {
-        self.inner.take_mut()
-    }
-}
-
-impl<'u, 'l, OuterT, U, L, FInner, E> TakeOwned<&'u Token<'u, U>, target::UpperToken>
-    for Prepared<OuterT, L, FInner, E>
-where
-    OuterT: TakeOwned<&'u Token<'u, U>, target::UpperToken>,
-{
-    fn take_owned(self) -> &'u Token<'u, U> {
         self.inner.take_owned()
     }
 }
@@ -83,12 +41,14 @@ impl<OuterT, T, F, E> Prepared<OuterT, T, F, E> {
             _err: PhantomData,
         }
     }
+
+    /// Chains this Prepared modification with another one, so that
+    /// both copies may be lazily modified, and afther both
+    /// doesn't indicate errors, they may be applied replaced into the
+    /// original values.
     pub fn chain<A2>(self, a2: A2) -> Chain<Self, A2>
 where {
         Chain::new(self, a2)
-    }
-    pub fn upgrade<U>(self) -> Upgrade<Self, U, T, E> {
-        Upgrade::new(self)
     }
 }
 

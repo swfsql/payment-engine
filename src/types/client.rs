@@ -127,10 +127,12 @@ impl Client {
                 // extx and disputing_tx would have the same txid information
                 let txid = &extx.txid;
 
-                let mut previous_txs = previous_txs;
-                let disputing_tx = previous_txs
-                    .get_mut(&extx.txid)
-                    .ok_or_else(|| DisputationOnANotFoundTxIdError(txid.clone()))?;
+                let (tx_upper, disputing_tx) = match previous_txs.get_mut(&extx.txid) {
+                    Ok((upper, tx)) => (upper, tx),
+                    Err(_previous_txs) => {
+                        return Err(DisputationOnANotFoundTxIdError(txid.clone()))
+                    }
+                };
                 if TxType::Deposit != disputing_tx.as_ref().ty {
                     return Err(DisputationOnNonDepositError(txid.clone()));
                 };
@@ -155,8 +157,8 @@ impl Client {
                     Ok(())
                 });
 
-                let client = client.apply()?;
-                let txs = disputing_tx.upgrade().apply()?;
+                let (client, tx) = client.chain(disputing_tx).split_apply()?;
+                let txs = tx_upper.consume(tx);
                 Ok(client.then(txs))
             }
             TxType::Resolve => {
@@ -167,12 +169,9 @@ impl Client {
                 // extx and resolving_tx would have the same txid information
                 let txid = &extx.txid;
 
-                let mut previous_txs = previous_txs;
-                let resolving_tx = previous_txs
-                    .get_mut(&extx.txid)
-                    .ok_or_else(|| ResolvingOnANotFoundTxIdError(txid.clone()))?;
-                if TxType::Deposit != resolving_tx.as_ref().ty {
-                    return Err(ResolvingOnNonDepositError(txid.clone()));
+                let (tx_upper, resolving_tx) = match previous_txs.get_mut(&extx.txid) {
+                    Ok((upper, tx)) => (upper, tx),
+                    Err(_previous_txs) => return Err(ResolvingOnNonDepositError(txid.clone())),
                 };
 
                 client.as_ref().check_client_id(resolving_tx.as_ref())?;
@@ -195,9 +194,9 @@ impl Client {
                     Ok(())
                 });
 
-                let client = client.apply()?;
-                let tx = resolving_tx.upgrade().apply()?;
-                Ok(client.then(tx))
+                let (client, tx) = client.chain(resolving_tx).split_apply()?;
+                let txs = tx_upper.consume(tx);
+                Ok(client.then(txs))
             }
             TxType::Chargeback => {
                 if let Some(ref amount) = extx.amount {
