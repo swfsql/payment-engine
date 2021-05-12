@@ -157,7 +157,7 @@ impl Client {
                     Ok(())
                 });
 
-                let (client, tx) = client.chain(disputing_tx).split_apply()?;
+                let (client, tx) = client.chain(disputing_tx).apply()?.split2();
                 let txs = tx_upper.consume(tx);
                 Ok(client.then(txs))
             }
@@ -194,7 +194,7 @@ impl Client {
                     Ok(())
                 });
 
-                let (client, tx) = client.chain(resolving_tx).split_apply()?;
+                let (client, tx) = client.chain(resolving_tx).apply()?.split2();
                 let txs = tx_upper.consume(tx);
                 Ok(client.then(txs))
             }

@@ -80,14 +80,13 @@ impl<'t, T> ConsumedToken<'t, T> {
     ) -> ConsumedToken<'tboth, (T, T2)> {
         ConsumedToken(PhantomData)
     }
+}
 
-    /// # Safety
-    ///
-    /// You must ensure that the components types are correct, since
-    /// any type may be used.
-    pub unsafe fn split<'t1, 't2, T1, T2>(
-        self,
-    ) -> (ConsumedToken<'t1, T1>, ConsumedToken<'t2, T2>) {
+impl<'t1, 't2, 'tboth, T1, T2> ConsumedToken<'tboth, (T1, T2)>
+where
+    'tboth: 't1 + 't2,
+{
+    pub fn split2(self) -> (ConsumedToken<'t1, T1>, ConsumedToken<'t2, T2>) {
         (ConsumedToken(PhantomData), ConsumedToken(PhantomData))
     }
 }

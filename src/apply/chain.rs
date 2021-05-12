@@ -19,30 +19,6 @@ impl<A1, A2> Chain<A1, A2> {
     pub fn chain<A3, F3>(self, a3: A3) -> Chain<(A1, A2), A3> {
         Chain::new((self.a1, self.a2), a3)
     }
-
-    // TODO: make so that Chain's of Chain's can also be split_applied
-    /// Executes `apply` except that the returned consumed token is split
-    /// into it's components.
-    pub fn split_apply<'t1, 't2, 'tboth, T1, T2, F1, F2, E>(
-        self,
-    ) -> Result<(ConsumedToken<'t1, T1>, ConsumedToken<'t2, T2>), E>
-    where
-        Self: Apply<'tboth, (T1, T2), (F1, F2), E>,
-        Self: PartialApply<(T1, T2), (F1, F2), E>,
-        A1: Take<F1, target::Function> + TakeOwned<Token<'t1, T1>, target::Token>,
-        A2: Take<F2, target::Function> + TakeOwned<Token<'t2, T2>, target::Token>,
-        T1: 't1 + 'tboth,
-        T2: 't2 + 'tboth,
-        F1: 't1 + Clone,
-        F2: 't2 + Clone,
-    {
-        let tokens = Self::apply(self)?;
-        // Safety:
-        //
-        // The components T1 and T2 are correct because they were merged
-        // during Self::apply
-        Ok(unsafe { tokens.split() })
-    }
 }
 
 impl<'t, A1, A2, F1, F2> TakeOwned<(F1, F2), target::Function> for Chain<A1, A2>
