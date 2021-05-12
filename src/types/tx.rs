@@ -1,6 +1,7 @@
 use crate::{
-    apply::Token,
+    apply::DowngradedTokenProtected,
     types::{client::ClTxError, Amount, ClientId},
+    TP,
 };
 use derive_more as dm;
 use serde::{Deserialize, Serialize};
@@ -138,6 +139,16 @@ impl Tx {
             disputed: false,
         }
     }
+    pub fn check_client_id(&self, client_id: &ClientId) -> Result<(), ClTxError> {
+        if &self.client == client_id {
+            Ok(())
+        } else {
+            Err(ClTxError::DifferentClientError {
+                incoming: client_id.clone(),
+                stored: self.client.clone(),
+            })
+        }
+    }
 }
 
 #[derive(Debug, Error)]
@@ -167,17 +178,41 @@ impl OrderedTxs {
             .ok()
             .and_then(|index| self.0.get(index))
     }
+}
 
-    pub fn get_mut<'t>(
+impl<'t> TP<'t, OrderedTxs> {
+    pub fn get_mut(
         &'t mut self,
         tx: &TxId,
-        _token: Token<'_, Self>,
-    ) -> Option<(Token<'t, Tx>, &mut Tx)> {
-        self.0
-            // assumes the vec is ordered
+    ) -> Option<DowngradedTokenProtected<'t, '_, OrderedTxs, Tx, TP<'_, Tx>>> {
+        let txs = self;
+        let index = txs
+            .as_ref()
+            .0 // assumes the vec is ordered
             .binary_search_by_key(tx, |cltx| cltx.txid.clone())
-            .ok()
-            .and_then(move |index| self.0.get_mut(index))
-            .map(Token::new)
+            .ok()?;
+
+        // safety: the token protection workflow is maintained.
+        // 1. no push/remove into/from txs (the container);
+        // 2. txs' token is consumed;
+        // 3. tx is token protected;
+        // 4. (optional) txs' token and tx's tokens are related
+        // (for posterior token upgrade).
+        let (inner, token) = unsafe { txs.split_mut() };
+        let tx = inner
+            .0
+            // the `get_mut` doesn't directly change the container,
+            .get_mut(index)
+            // and the inner item is token protected
+            .map(TP::new)?;
+        // safety: tx is guaranteed to have come from txs
+        // ie. this Tx came from the Vec<Tx>.
+        //
+        // token relation between the container and the item is created,
+        // and the container token is also consumed
+        let down = unsafe { token.with_downgrade(tx) };
+        // let down = unsafe { txs.downgrade(tx) };
+
+        Some(down)
     }
 }

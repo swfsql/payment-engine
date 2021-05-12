@@ -1,7 +1,8 @@
+// pub mod apply;
 pub mod apply;
 pub mod types;
 
-pub use apply::{Apply, Prepare};
+pub use apply::{Apply, Prepared, TokenProtected as TP};
 use std::collections::HashMap;
 use tracing::error;
 pub use types::{
@@ -15,22 +16,19 @@ pub fn run(inputs: impl Iterator<Item = ExternalTx>) -> Clients {
     let mut internal_txid = tx::InternalTxId::default();
 
     for cltx in inputs.into_iter() {
-        use apply::Token;
-
         let id = &cltx.client;
         #[allow(clippy::or_fun_call)]
         let client = clients.entry(id.clone()).or_insert(Client::new(id));
 
-        let (token_client, client) = Token::new(client);
-        let (token_txs, client_txs) = Token::new(&mut txs);
+        let protected_client = TP::new(client);
+        let protected_txs = TP::new(&mut txs);
 
-        match client
-            .try_process_transaction(token_client, &cltx, client_txs, token_txs)
+        match Client::try_process_transaction(protected_client, &cltx, protected_txs)
             .map_err(|e| cltx.client_error(e, internal_txid.clone()))
         {
-            Ok(()) => match cltx.ty {
+            Ok(_consumed_tokens) => match cltx.ty {
                 TxType::Deposit | TxType::Withdrawal => {
-                    client_txs.push_ordered(tx::Tx::from_external(&cltx, internal_txid.clone()));
+                    txs.push_ordered(tx::Tx::from_external(&cltx, internal_txid.clone()));
                 }
                 TxType::Dispute | TxType::Resolve | TxType::Chargeback => (),
             },

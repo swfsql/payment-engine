@@ -1,11 +1,11 @@
+use crate::{apply::ConsumedToken, Apply};
 use crate::{
-    apply::Token,
     types::{
         tx::{self, TxType, Txs},
         Amount, ClientId, ExternalTx, RhsSubTooBigError, TxId,
     },
+    TP,
 };
-use crate::{Apply, Prepare};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use thiserror::Error;
@@ -34,8 +34,11 @@ pub enum ClTxError {
     #[error("Incoming tx has the amount field when none was expected. Found: {0:?}")]
     ExpectingEmptyAmountError(Amount),
     //
-    #[error("Incoming tx indicates a tx of another client. Incoming tx client: {0:?}, indicated tx client: {1:?}")]
-    DifferentClientError(ClientId, ClientId),
+    #[error("Incoming tx indicates a tx of another client. Incoming tx client: {incoming:?}, indicated tx client: {stored:?}")]
+    DifferentClientError {
+        incoming: ClientId,
+        stored: ClientId,
+    },
     #[error("The client is locked")]
     LockedClientError,
     //
@@ -78,41 +81,43 @@ impl Client {
         if self.id == tx.client {
             Ok(())
         } else {
-            Err(ClTxError::DifferentClientError(
-                self.id.clone(),
-                tx.client.clone(),
-            ))
+            Err(ClTxError::DifferentClientError {
+                incoming: self.id.clone(),
+                stored: tx.client.clone(),
+            })
         }
     }
-    pub fn try_process_transaction<'c, 't>(
-        &'c mut self,
-        token_client: Token<'c, Client>,
-        extx: &ExternalTx,
-        previous_txs: &mut Txs,
-        token_txs: Token<'t, Txs>,
-    ) -> Result<(), ClTxError> {
+    pub fn try_process_transaction<'t>(
+        client: TP<'t, Client>,
+        extx: &'t ExternalTx,
+        previous_txs: TP<'t, Txs>,
+    ) -> Result<ConsumedToken<'t, (Client, Txs)>, ClTxError> {
         use ClTxError::*;
         match &extx.ty {
             TxType::Deposit => {
                 let amount = extx.amount.as_ref().ok_or(MissingAmountError)?;
-                self.prepare(|next| {
-                    next.available += amount.clone();
-                    next.total += amount.clone();
-                    Ok(())
-                })
-                .apply(token_client)
+                client
+                    .prepare(move |next: &mut Client| {
+                        next.available += amount.clone();
+                        next.total += amount.clone();
+                        Ok(())
+                    })
+                    .chain(previous_txs.skip())
+                    .apply()
             }
             TxType::Withdrawal => {
                 let amount = extx.amount.as_ref().ok_or(MissingAmountError)?;
-                if self.locked {
+                if client.as_ref().locked {
                     return Err(LockedClientError);
                 }
-                self.prepare(|next| {
+
+                let client = client.prepare(move |next: &mut Client| {
                     next.available.sufficient_sub(amount)?;
                     next.total.sufficient_sub(amount)?;
                     Ok(())
-                })
-                .apply(token_client)
+                });
+
+                client.chain(previous_txs.skip()).apply()
             }
             TxType::Dispute => {
                 if let Some(ref amount) = extx.amount {
@@ -122,32 +127,37 @@ impl Client {
                 // extx and disputing_tx would have the same txid information
                 let txid = &extx.txid;
 
-                let (token_tx, disputing_tx) = previous_txs
-                    .get_mut(&extx.txid, token_txs)
+                let mut previous_txs = previous_txs;
+                let disputing_tx = previous_txs
+                    .get_mut(&extx.txid)
                     .ok_or_else(|| DisputationOnANotFoundTxIdError(txid.clone()))?;
-                if TxType::Deposit != disputing_tx.ty {
+                if TxType::Deposit != disputing_tx.as_ref().ty {
                     return Err(DisputationOnNonDepositError(txid.clone()));
-                }
-                self.check_client_id(disputing_tx)?;
+                };
+
+                client.as_ref().check_client_id(disputing_tx.as_ref())?;
 
                 let amount = disputing_tx
+                    .as_ref()
                     .amount
                     .as_ref()
                     .ok_or(MissingAmountError)?
                     .clone();
 
-                let p1 = self.prepare(|next| {
+                let client = client.prepare::<_, ClTxError>(|next: &mut Client| {
                     next.available.sufficient_sub(&amount)?;
                     next.held += amount.clone();
                     Ok(())
                 });
 
-                let p2 = disputing_tx.prepare(|next| {
+                let disputing_tx = disputing_tx.prepare::<_, ClTxError>(|next: &mut tx::Tx| {
                     next.set_disputed()?;
                     Ok(())
                 });
 
-                p1.chain(p2).apply(token_client.then(token_tx))
+                let client = client.apply()?;
+                let txs = disputing_tx.upgrade().apply()?;
+                Ok(client.then(txs))
             }
             TxType::Resolve => {
                 if let Some(ref amount) = extx.amount {
@@ -157,32 +167,37 @@ impl Client {
                 // extx and resolving_tx would have the same txid information
                 let txid = &extx.txid;
 
-                let (token_tx, resolving_tx) = previous_txs
-                    .get_mut(&extx.txid, token_txs)
+                let mut previous_txs = previous_txs;
+                let resolving_tx = previous_txs
+                    .get_mut(&extx.txid)
                     .ok_or_else(|| ResolvingOnANotFoundTxIdError(txid.clone()))?;
-                if TxType::Deposit != resolving_tx.ty {
+                if TxType::Deposit != resolving_tx.as_ref().ty {
                     return Err(ResolvingOnNonDepositError(txid.clone()));
-                }
-                self.check_client_id(resolving_tx)?;
+                };
+
+                client.as_ref().check_client_id(resolving_tx.as_ref())?;
 
                 let amount = resolving_tx
+                    .as_ref()
                     .amount
                     .as_ref()
                     .ok_or(MissingAmountError)?
                     .clone();
 
-                let p1 = self.prepare(|next| {
+                let client = client.prepare::<_, ClTxError>(|next: &mut Client| {
                     next.held.sufficient_sub(&amount)?;
                     next.available += amount.clone();
                     Ok(())
                 });
 
-                let p2 = resolving_tx.prepare(|next| {
+                let resolving_tx = resolving_tx.prepare::<_, ClTxError>(|next: &mut tx::Tx| {
                     next.unset_disputed()?;
                     Ok(())
                 });
 
-                p1.chain(p2).apply(token_client.then(token_tx))
+                let client = client.apply()?;
+                let tx = resolving_tx.upgrade().apply()?;
+                Ok(client.then(tx))
             }
             TxType::Chargeback => {
                 if let Some(ref amount) = extx.amount {
@@ -193,15 +208,18 @@ impl Client {
                 let txid = &extx.txid;
 
                 let chargeback_tx = previous_txs
+                    .as_ref()
                     .get(&extx.txid)
                     .ok_or_else(|| ChargebackOnANotFoundTxIdError(txid.clone()))?;
+
                 if TxType::Deposit != chargeback_tx.ty {
                     return Err(ChargebackOnNonDepositError(txid.clone()));
-                }
+                };
                 if !chargeback_tx.is_disputed() {
                     return Err(ChargebackOnNonDisputedTxError(txid.clone()));
                 }
-                self.check_client_id(chargeback_tx)?;
+
+                client.as_ref().check_client_id(chargeback_tx)?;
 
                 let amount = chargeback_tx
                     .amount
@@ -209,13 +227,14 @@ impl Client {
                     .ok_or(MissingAmountError)?
                     .clone();
 
-                self.prepare(|next| {
+                let client = client.prepare::<_, ClTxError>(move |next: &mut Client| {
                     next.held.sufficient_sub(&amount)?;
                     next.total.sufficient_sub(&amount)?;
                     next.locked = true;
                     Ok(())
-                })
-                .apply(token_client)
+                });
+
+                client.chain(previous_txs.skip()).apply()
             }
         }
     }
