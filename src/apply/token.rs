@@ -50,6 +50,11 @@ impl<'u, 'l, U, L> UpgraderToken<'u, 'l, U, L> {
         self.upper.into()
     }
 
+    /// Consumes the token without changing `T` (as it's innaccesible).
+    pub fn returned(self, _lower: impl Into<Token<'l, L>>) -> Token<'u, U> {
+        self.upper
+    }
+
     /// Discards an unconsummed lower Token, and extracets the upper one.
     pub fn discard_lower(self, _lower: Token<'l, L>) -> Token<'u, U> {
         self.upper
@@ -69,6 +74,15 @@ impl<'t, T> Token<'t, T> {
     /// Consumes the token.
     pub fn consume(self) -> ConsumedToken<'t, T> {
         self.into()
+    }
+}
+
+impl<'t1, 't2, 'tboth, T1, T2> Token<'tboth, (T1, T2)>
+where
+    'tboth: 't1 + 't2,
+{
+    pub fn split2(self) -> (Token<'t1, T1>, Token<'t2, T2>) {
+        (Token(PhantomData), Token(PhantomData))
     }
 }
 
@@ -147,6 +161,16 @@ impl<'t, T> TokenProtected<'t, T> {
         let l = TP::new(f1(self.inner));
         let u = UpgraderToken::new(self.token, &l);
         (u, l)
+    }
+
+    pub fn token(self) -> Token<'t, T> {
+        self.token
+    }
+}
+
+impl<'t, T> From<TokenProtected<'t, T>> for Token<'t, T> {
+    fn from(t: TokenProtected<'t, T>) -> Self {
+        t.token()
     }
 }
 

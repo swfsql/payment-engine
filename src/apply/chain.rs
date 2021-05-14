@@ -74,20 +74,27 @@ where
         let consumed2 = ConsumedToken::from(t2);
         consumed1.then(consumed2)
     }
-    fn apply(mut self) -> Result<ConsumedToken<'tboth, (T1, T2)>, E> {
+    #[allow(clippy::type_complexity)]
+    fn apply(mut self) -> Result<ConsumedToken<'tboth, (T1, T2)>, (E, Token<'tboth, (T1, T2)>)> {
         let next = Self::get_next(&self);
         let f1: &mut F1 = self.a1.take_mut();
         let f2: &mut F2 = self.a2.take_mut();
 
         // modify both copies
-        let (next1, next2) = Self::modify_next(next, (f1.clone(), f2.clone()))?;
+        let (next1, next2) = match Self::modify_next(next, (f1.clone(), f2.clone())) {
+            Ok((v1, v2)) => (v1, v2),
+            Err(e) => {
+                let t1: Token<T1> = self.a1.take_owned();
+                let t2: Token<T2> = self.a2.take_owned();
+                return Err((e, t1.then(t2)));
+            }
+        };
 
         // only replace after both modifications were successfull
         Self::replace(&mut self, (next1, next2));
 
         let t1: Token<T1> = self.a1.take_owned();
         let t2: Token<T2> = self.a2.take_owned();
-
         let consumed1 = ConsumedToken::from(t1);
         let consumed2 = ConsumedToken::from(t2);
 

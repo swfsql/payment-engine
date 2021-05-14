@@ -1,3 +1,5 @@
+pub mod macros;
+
 pub mod chain;
 pub mod prepared;
 pub mod token;
@@ -5,6 +7,10 @@ pub mod token;
 pub use chain::Chain;
 pub use prepared::Prepared;
 pub use token::{ConsumedToken, Token, TokenProtected};
+
+/// Return type enforcing either that _all_ of the Tokens were consumed,
+/// or that _none_ of the Tokens were consumed.
+pub type TResult<'t, T, E> = std::result::Result<ConsumedToken<'t, T>, (E, Token<'t, T>)>;
 
 /// Information to diverge some access trait implementations.
 pub mod target {
@@ -43,5 +49,5 @@ pub trait Apply<'t, T, F, E> {
     fn consume_token(self) -> ConsumedToken<'t, T>;
     /// Creates a copy of `T`, modifies it, and then replaces it into the
     /// original `T`.
-    fn apply(self) -> Result<ConsumedToken<'t, T>, E>;
+    fn apply(self) -> Result<ConsumedToken<'t, T>, (E, Token<'t, T>)>;
 }

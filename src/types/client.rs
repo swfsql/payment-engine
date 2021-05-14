@@ -1,4 +1,4 @@
-use crate::{apply::ConsumedToken, Apply};
+use crate::{err, try_on, Apply, TResult};
 use crate::{
     types::{
         tx::{self, TxType, Txs},
@@ -87,15 +87,17 @@ impl Client {
             })
         }
     }
+
     pub fn try_process_transaction<'t>(
         client: TP<'t, Client>,
         extx: &'t ExternalTx,
         previous_txs: TP<'t, Txs>,
-    ) -> Result<ConsumedToken<'t, (Client, Txs)>, ClTxError> {
+    ) -> TResult<'t, (Client, Txs), ClTxError> {
         use ClTxError::*;
         match &extx.ty {
             TxType::Deposit => {
-                let amount = extx.amount.as_ref().ok_or(MissingAmountError)?;
+                let amount = extx.amount.as_ref().ok_or(MissingAmountError);
+                let amount = try_on!(amount, client, previous_txs);
                 client
                     .prepare(move |next: &mut Client| {
                         next.available += amount.clone();
@@ -106,9 +108,11 @@ impl Client {
                     .apply()
             }
             TxType::Withdrawal => {
-                let amount = extx.amount.as_ref().ok_or(MissingAmountError)?;
+                let amount = extx.amount.as_ref().ok_or(MissingAmountError);
+                let amount = try_on!(amount, client, previous_txs);
                 if client.as_ref().locked {
-                    return Err(LockedClientError);
+                    let err = LockedClientError;
+                    return err!(err, client, previous_txs);
                 }
 
                 let client = client.prepare(move |next: &mut Client| {
@@ -121,30 +125,35 @@ impl Client {
             }
             TxType::Dispute => {
                 if let Some(ref amount) = extx.amount {
-                    return Err(ExpectingEmptyAmountError(amount.clone()));
+                    let err = ExpectingEmptyAmountError(amount.clone());
+                    return err!(err, client, previous_txs);
                 }
 
                 // extx and disputing_tx would have the same txid information
                 let txid = &extx.txid;
 
                 let (tx_upper, disputing_tx) = match previous_txs.get_mut(&extx.txid) {
-                    Ok((upper, tx)) => (upper, tx),
-                    Err(_previous_txs) => {
-                        return Err(DisputationOnANotFoundTxIdError(txid.clone()))
+                    Ok(ok) => ok,
+                    Err(previous_txs) => {
+                        let err = DisputationOnANotFoundTxIdError(txid.clone());
+                        return err!(err, client, previous_txs);
                     }
                 };
+
                 if TxType::Deposit != disputing_tx.as_ref().ty {
-                    return Err(DisputationOnNonDepositError(txid.clone()));
+                    let err = DisputationOnNonDepositError(txid.clone());
+                    return err!(err, client, tx_upper.returned(disputing_tx));
                 };
 
-                client.as_ref().check_client_id(disputing_tx.as_ref())?;
+                let check = client.as_ref().check_client_id(disputing_tx.as_ref());
+                try_on!(check, client, tx_upper.returned(disputing_tx));
 
                 let amount = disputing_tx
                     .as_ref()
                     .amount
                     .as_ref()
-                    .ok_or(MissingAmountError)?
-                    .clone();
+                    .ok_or(MissingAmountError);
+                let amount = try_on!(amount, client, tx_upper.returned(disputing_tx)).clone();
 
                 let client = client.prepare::<_, ClTxError>(|next: &mut Client| {
                     next.available.sufficient_sub(&amount)?;
@@ -157,31 +166,43 @@ impl Client {
                     Ok(())
                 });
 
-                let (client, tx) = client.chain(disputing_tx).apply()?.split2();
-                let txs = tx_upper.consume(tx);
-                Ok(client.then(txs))
+                match client.chain(disputing_tx).apply() {
+                    Ok(tokens) => {
+                        let (client, tx) = tokens.split2();
+                        Ok(client.then(tx_upper.consume(tx)))
+                    }
+                    Err((e, tokens)) => {
+                        let (client, tx) = tokens.split2();
+                        err!(e, client, tx_upper.returned(tx))
+                    }
+                }
             }
             TxType::Resolve => {
                 if let Some(ref amount) = extx.amount {
-                    return Err(ExpectingEmptyAmountError(amount.clone()));
+                    let err = ExpectingEmptyAmountError(amount.clone());
+                    return err!(err, client, previous_txs);
                 }
 
                 // extx and resolving_tx would have the same txid information
                 let txid = &extx.txid;
 
                 let (tx_upper, resolving_tx) = match previous_txs.get_mut(&extx.txid) {
-                    Ok((upper, tx)) => (upper, tx),
-                    Err(_previous_txs) => return Err(ResolvingOnNonDepositError(txid.clone())),
+                    Ok(ok) => ok,
+                    Err(previous_txs) => {
+                        let err = ResolvingOnNonDepositError(txid.clone());
+                        return err!(err, client, previous_txs);
+                    }
                 };
 
-                client.as_ref().check_client_id(resolving_tx.as_ref())?;
+                let check = client.as_ref().check_client_id(resolving_tx.as_ref());
+                try_on!(check, client, tx_upper.returned(resolving_tx));
 
                 let amount = resolving_tx
                     .as_ref()
                     .amount
                     .as_ref()
-                    .ok_or(MissingAmountError)?
-                    .clone();
+                    .ok_or(MissingAmountError);
+                let amount = try_on!(amount, client, tx_upper.returned(resolving_tx)).clone();
 
                 let client = client.prepare::<_, ClTxError>(|next: &mut Client| {
                     next.held.sufficient_sub(&amount)?;
@@ -194,14 +215,22 @@ impl Client {
                     Ok(())
                 });
 
-                let (client, tx) = client.chain(resolving_tx).apply()?.split2();
-                let txs = tx_upper.consume(tx);
-                Ok(client.then(txs))
+                match client.chain(resolving_tx).apply() {
+                    Ok(tokens) => {
+                        let (client, tx) = tokens.split2();
+                        Ok(client.then(tx_upper.consume(tx)))
+                    }
+                    Err((e, tokens)) => {
+                        let (client, tx) = tokens.split2();
+                        err!(e, client, tx_upper.returned(tx))
+                    }
+                }
             }
             TxType::Chargeback => {
                 if let Some(ref amount) = extx.amount {
-                    return Err(ExpectingEmptyAmountError(amount.clone()));
-                }
+                    let err = ExpectingEmptyAmountError(amount.clone());
+                    return err!(err, client, previous_txs);
+                };
 
                 // extx and chargeback_tx would have the same txid information
                 let txid = &extx.txid;
@@ -209,22 +238,23 @@ impl Client {
                 let chargeback_tx = previous_txs
                     .as_ref()
                     .get(&extx.txid)
-                    .ok_or_else(|| ChargebackOnANotFoundTxIdError(txid.clone()))?;
+                    .ok_or_else(|| ChargebackOnANotFoundTxIdError(txid.clone()));
+                let chargeback_tx = try_on!(chargeback_tx, client, previous_txs);
 
                 if TxType::Deposit != chargeback_tx.ty {
-                    return Err(ChargebackOnNonDepositError(txid.clone()));
+                    let err = ChargebackOnNonDepositError(txid.clone());
+                    return err!(err, client, previous_txs);
                 };
                 if !chargeback_tx.is_disputed() {
-                    return Err(ChargebackOnNonDisputedTxError(txid.clone()));
-                }
+                    let err = ChargebackOnNonDisputedTxError(txid.clone());
+                    return err!(err, client, previous_txs);
+                };
 
-                client.as_ref().check_client_id(chargeback_tx)?;
+                let check = client.as_ref().check_client_id(chargeback_tx);
+                try_on!(check, client, previous_txs);
 
-                let amount = chargeback_tx
-                    .amount
-                    .as_ref()
-                    .ok_or(MissingAmountError)?
-                    .clone();
+                let amount = chargeback_tx.amount.as_ref().ok_or(MissingAmountError);
+                let amount = try_on!(amount, client, previous_txs).clone();
 
                 let client = client.prepare::<_, ClTxError>(move |next: &mut Client| {
                     next.held.sufficient_sub(&amount)?;

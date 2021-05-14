@@ -2,7 +2,7 @@
 pub mod apply;
 pub mod types;
 
-pub use apply::{Apply, Prepared, TokenProtected as TP};
+pub use apply::{Apply, Prepared, TResult, Token, TokenProtected as TP};
 use std::collections::HashMap;
 use tracing::error;
 pub use types::{
@@ -24,7 +24,7 @@ pub fn run(inputs: impl Iterator<Item = ExternalTx>) -> Clients {
         let protected_txs = TP::new(&mut txs);
 
         match Client::try_process_transaction(protected_client, &cltx, protected_txs)
-            .map_err(|e| cltx.client_error(e, internal_txid.clone()))
+            .map_err(|(e, _tokens)| cltx.client_error(e, internal_txid.clone()))
         {
             Ok(_consumed_tokens) => match cltx.ty {
                 TxType::Deposit | TxType::Withdrawal => {

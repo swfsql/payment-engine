@@ -88,10 +88,17 @@ where
         let t = self.inner.take_owned();
         ConsumedToken::from(t)
     }
-    fn apply(mut self) -> Result<ConsumedToken<'t, T>, E> {
+    fn apply(mut self) -> Result<ConsumedToken<'t, T>, (E, Token<'t, T>)> {
         let next = self.get_next();
         let f = self.f.clone();
-        let next = Self::modify_next(next, f)?;
+
+        let next = match Self::modify_next(next, f) {
+            Ok(v) => v,
+            Err(e) => {
+                let t = self.inner.take_owned();
+                return Err((e, t));
+            }
+        };
         self.replace(next);
         //
         let t = self.inner.take_owned();

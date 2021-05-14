@@ -31,10 +31,10 @@ There is mostly one type of error, which is highly related to the clients as the
 
 Thinking on the error cases, which trigger early returns, I tried to avoid making state changes before all early returns - otherwise the states could be left partially changed.
 
-The design in this project doesn't guarantee at compile-time that the contract mentioned above is followed. I tried making all state changes into the _copies_ of the states - not on the states themselves - and then tried to apply all actual changes on the states by state replacement, where all of them should be executed after all early-return points.
+The design in this project guarantees at compile-time that the contract mentioned above is followed. I tried making all state changes into the _copies_ of the states - not on the states themselves - and then tried to apply all actual changes on the states by state replacement, where all of them should be executed after _all_ early-return points - this includes both "ok" early-returns, and "error" early-returns.
 
-To help with this, there is the `apply` module, which includes, on it's traits, methods to `prepare` state changes (that happens on copies), and then those preparations can receive `apply`ments after all preparations and (hopefully) all early-return points.  
-To (possibly) improve the chances of catching mistakes, I inserted a `Token` consumption when applying the prepared state changes, but the coders can create as many tokens as they want, so there is no guarantee.
+To help with this, there is the `apply` module, which includes, on it's traits, methods to `prepare` state changes (that happens on copies), and then those preparations can receive `apply`ments after all preparations.  
+To make this possible, I inserted a `Token` consumption when applying the prepared state changes.
 
 ## Tests
 
